@@ -1,6 +1,6 @@
 # TensorForge
 
-**A tiny optimizing tensor compiler with a JIT backend — built from scratch in Python + C.**
+**A tiny optimizing tensor compiler with a JIT backend, built from scratch in Python + C.**
 
 TensorForge takes a neural network written in a small Python eDSL, lowers it to
 an SSA dataflow IR, runs a pipeline of classic compiler optimizations, generates
@@ -21,7 +21,7 @@ PyTorch Inductor, Triton) actually do — minus the 200k lines of code.
 ## Why this is interesting
 
 The headline transformation is **operator fusion**. A linear layer naively runs
-as three separate kernels — `matmul`, `bias add`, `activation` — each of which
+as three separate kernels:  `matmul`, `bias add`, `activation`  each of which
 streams the entire activation matrix through memory. TensorForge's `fuse_linear`
 pass collapses them into one `linear` op that applies bias + activation as a
 **register-resident epilogue**, eliminating two full memory round-trips. This is
@@ -47,10 +47,10 @@ JIT (autotuned tiles) :  99.881 ms   (1.15x over default tiles)
 
 ## What's implemented
 
-**Frontend** (`tensor.py`) — operator-overloaded `Tensor` handles build the
+**Frontend** (`tensor.py`): operator-overloaded `Tensor` handles build the
 graph lazily; `relu(x @ w + b)` *is* the program.
 
-**IR** (`ir.py`, `graph.py`) — typed SSA dataflow graph with structural hashing,
+**IR** (`ir.py`, `graph.py`), typed SSA dataflow graph with structural hashing,
 use-def chains, topological traversal, and `replace_all_uses` rewiring.
 
 **Optimization passes** (`passes.py`), run to a fixed point:
@@ -71,7 +71,7 @@ benchmarks each on representative data, and selects the fastest. The classic
 *compile → measure → select* loop, with a hand-written search space instead of
 a learned cost model.
 
-**Reference semantics** (`reference.py`) — a numpy interpreter for the IR that
+**Reference semantics** (`reference.py`): a numpy interpreter for the IR that
 serves as the ground truth every compiled run is checked against.
 
 ## Run it
@@ -88,7 +88,7 @@ No dependencies beyond `numpy` and a C compiler (`gcc`).
 
 This is a portfolio compiler, not a BLAS replacement. The micro-kernel is scalar
 C (no hand-vectorized intrinsics, no packing), single-threaded, and 2D-dense
-only. numpy's multithreaded BLAS will beat it on raw GEMM — the point is to
+only. numpy's multithreaded BLAS will beat it on raw GEMM, the point is to
 demonstrate the **compiler pipeline** (IR, passes, fusion, codegen, autotuning),
 which is the part that transfers directly to real systems.
 
