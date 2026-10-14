@@ -27,6 +27,9 @@ pass collapses them into one `linear` op that applies bias + activation as a
 **register-resident epilogue**, eliminating two full memory round-trips. This is
 the single most important optimization in real ML compilers.
 
+The following output was previously reported as an illustrative example; its
+1.15x speedup is not a guarantee or a reproduced measurement.
+
 ```
 $ python examples/mlp.py
 
@@ -57,7 +60,7 @@ use-def chains, topological traversal, and `replace_all_uses` rewiring.
 | pass | what it does |
 |------|--------------|
 | constant folding | evaluates all-constant subgraphs at compile time |
-| algebraic simplification | `x+0`, `x*1`, `x*0`, `-(-x)` rewrites |
+| algebraic simplification | `x+0`, `x*1`, `-(-x)` rewrites |
 | common subexpression elimination | merges structurally identical nodes |
 | **operator fusion** | `matmul → +bias → activation` ⟹ one `linear` |
 | dead code elimination | drops nodes unreachable from the outputs |
@@ -74,15 +77,47 @@ a learned cost model.
 **Reference semantics** (`reference.py`): a numpy interpreter for the IR that
 serves as the ground truth every compiled run is checked against.
 
-## Run it
+## Install and run
+
+Supported and verified: Linux with Python 3.10+ and `gcc` on PATH. On Debian/Ubuntu,
+install the native dependencies with `sudo apt-get install gcc python3-venv`.
+Windows users can use WSL2 with Ubuntu. Native Windows and macOS are not verified;
+the runtime currently uses Linux-style shared libraries and GCC flags.
 
 ```bash
-python examples/mlp.py          # build → optimize → autotune → benchmark
-python examples/show_passes.py  # watch fold/simplify/CSE/DCE clean a messy graph
+git clone https://github.com/Grace-Fokam/TensorForge.git
+cd TensorForge
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install ".[test]"
+python -m pytest -q
 python tests/test_correctness.py
+python examples/show_passes.py
+python examples/mlp.py --quick  # small end-to-end C JIT correctness check
+python examples/mlp.py          # full 81-config autotuning search and benchmark
 ```
 
-No dependencies beyond `numpy` and a C compiler (`gcc`).
+Use `python -m pip install -e ".[test]"` for development. The lowercase
+`tensorforge/` directory is the installed package; `examples/` and `tests/` contain
+standalone scripts. No `sys.path` changes or repository-name assumptions are needed.
+Runtime dependencies are NumPy and GCC; pytest is included only in the `test` extra.
+The JIT requires a writable temporary directory and permission to load native code.
+Generated C and shared libraries are cached in the temporary `tensorforge_cache`
+directory; delete that directory to force recompilation after changing compiler
+flags or moving to different hardware (`-march=native` specializes to the host).
+
+For a short demonstration, run `show_passes.py` followed by `mlp.py --quick`:
+the former asserts preserved semantics after fold/simplify/CSE, while the latter
+reduces an eight-op MLP to three fused linears, compiles C, and asserts both default
+and selected tile outputs against the original unoptimized NumPy graph.
+GitHub Actions runs all nine correctness tests and these lightweight demos on
+Ubuntu with Python 3.10 and 3.12. Full autotuning is intentionally outside CI.
+
+The full demo tunes the first layer and applies that configuration to all layers.
+It reports warmed execution latency (including allocations and Python dispatch),
+excluding compilation. A configuration that wins on the first layer can lose on
+the complete MLP. NumPy timing also depends on its BLAS and thread settings.
+See [BENCHMARK.md](BENCHMARK.md) for measured results and reproduction details.
 
 ## Honest limitations
 

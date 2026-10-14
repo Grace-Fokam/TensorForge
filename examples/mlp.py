@@ -2,8 +2,8 @@
 
 Run:  python examples/mlp.py
 """
-import sys, os, time
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+import argparse
+import time
 
 import numpy as np
 
@@ -43,7 +43,11 @@ def main():
     print("TensorForge :: end-to-end MLP compilation")
     print("=" * 70)
 
-    g, feeds = build_mlp()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--quick", action="store_true", help="small pipeline check without autotuning")
+    args = parser.parse_args()
+    g, feeds = build_mlp(batch=8, din=16, hidden=(32, 32), dout=4) if args.quick else build_mlp()
+    original_ref = run_reference(g, feeds)
     print(f"\nBuilt MLP graph: {g.num_ops()} ops before optimization")
     print(g.pretty())
 
@@ -53,16 +57,17 @@ def main():
     print(g.pretty())
 
     # Correctness vs numpy reference
-    ref = run_reference(g, feeds)
+    ref = original_ref
 
     # Autotune the dominant GEMM shape (first hidden layer).
     M, K = feeds["x"].shape
-    N = 1024
-    print(f"\n--- autotuning fused-linear for ({M}x{K})@({K}x{N}) ---")
-    best = autotune(M, N, K, activation="relu", has_bias=True, verbose=False)
+    N = next(n for n in g.topo() if n.op == "linear").shape[1]
+    if not args.quick:
+        print(f"\n--- autotuning fused-linear for ({M}x{K})@({K}x{N}) ---")
+    best = [] if args.quick else autotune(M, N, K, activation="relu", has_bias=True, verbose=False)
     for r in best:
         print(f"  {r.cfg.label():38s} {r.ms:8.3f} ms  {r.gflops:7.2f} GFLOP/s")
-    chosen = best[0].cfg
+    chosen = TileConfig() if args.quick else best[0].cfg
     print(f"\nchosen config: {chosen.label()}")
 
     # Run JIT engine with default vs tuned config
@@ -71,7 +76,12 @@ def main():
     out = eng_tuned.run(feeds)
     err = np.abs(ref[0] - out[0]).max()
     print(f"\ncorrectness vs numpy reference: max abs error = {err:.2e}")
-    assert err < 1e-2
+    np.testing.assert_allclose(out[0], ref[0], atol=1e-4, rtol=1e-4)
+    np.testing.assert_allclose(eng_default.run(feeds)[0], ref[0], atol=1e-4, rtol=1e-4)
+    if args.quick:
+        assert g.num_ops() == 3
+        print("PASS: frontend → optimization → C JIT → NumPy validation")
+        return
 
     t_np, _ = bench(lambda: run_reference(g, feeds))
     t_def, _ = bench(lambda: eng_default.run(feeds))

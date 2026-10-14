@@ -2,8 +2,6 @@
 
 Run:  python examples/show_passes.py
 """
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 
@@ -43,6 +41,7 @@ def main():
     print("\nAFTER  (", g.num_ops(), "ops )")
     print(g.pretty())
     out2 = run_reference(g, feeds)
+    np.testing.assert_allclose(ref[0], out2[0], atol=1e-4, rtol=1e-4)
     print("\nsemantics preserved:",
           np.allclose(ref[0], out2[0], atol=1e-4))
 
