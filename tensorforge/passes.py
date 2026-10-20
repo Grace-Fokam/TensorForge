@@ -44,6 +44,12 @@ def _eval_const(node: Node) -> np.ndarray:
         return 1.0 / (1.0 + np.exp(-xs[0]))
     if node.op == "tanh":
         return np.tanh(xs[0])
+    if node.op == "linear":
+        from .reference import _act
+        result = xs[0] @ xs[1]
+        if node.attrs.get("has_bias"):
+            result = result + xs[2]
+        return _act(node.attrs.get("activation", "none"), result)
     raise NotImplementedError(node.op)
 
 
@@ -64,7 +70,7 @@ def constant_folding(g: Graph) -> PassReport:
 # 2. Algebraic simplification: x+0, x*1, x*0, --x, etc.
 # ---------------------------------------------------------------------------
 def _is_all(node: Node, value: float) -> bool:
-    return is_const(node) and np.allclose(node.data, value)
+    return is_const(node) and np.all(node.data == value)
 
 
 def algebraic_simplify(g: Graph) -> PassReport:
@@ -113,6 +119,8 @@ def fuse_linear(g: Graph) -> PassReport:
     users = g.users()
 
     def single_user(n):
+        if any(o is n for o in g.outputs):
+            return None
         u = users.get(n.id, [])
         return u[0] if len(u) == 1 else None
 

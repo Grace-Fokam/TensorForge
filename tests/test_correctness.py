@@ -1,6 +1,4 @@
 """Correctness tests: optimized + JIT-compiled output must match the spec."""
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import numpy as np
 
@@ -66,6 +64,54 @@ def test_algebraic_identity():
     g = Graph([(x + zero)], [])
     algebraic_simplify(g)
     assert g.outputs[0].op == "placeholder"
+
+
+def test_fusion_preserves_intermediate_outputs():
+    rng = np.random.default_rng(4)
+    x = placeholder((3, 5), "x")
+    w = const(rng.standard_normal((5, 7)).astype(np.float32))
+    mm = x @ w
+    biased = mm + const(np.ones(7, np.float32))
+    g = Graph([mm, biased, relu(biased)], [x])
+    feeds = {"x": rng.standard_normal((3, 5)).astype(np.float32)}
+    expected = run_reference(g, feeds)
+    optimize(g)
+    for actual, ref in zip(Engine(g).run(feeds), expected):
+        np.testing.assert_allclose(actual, ref, rtol=1e-5, atol=1e-5)
+
+
+def test_near_zero_is_not_an_identity():
+    x = placeholder((2, 2), "x")
+    g = Graph([x + const(np.full((2, 2), 1e-9, np.float32))], [x])
+    feeds = {"x": np.zeros((2, 2), np.float32)}
+    expected = run_reference(g, feeds)
+    optimize(g)
+    np.testing.assert_array_equal(Engine(g).run(feeds)[0], expected[0])
+
+
+def test_constant_linear_folding():
+    from tensorforge.ir import Node
+    a = const(np.ones((2, 3), np.float32))
+    b = const(np.ones((3, 4), np.float32))
+    bias = const(np.ones(4, np.float32))
+    linear = Node("linear", (a.node, b.node, bias.node), (2, 4),
+                  attrs={"has_bias": True, "activation": "relu"})
+    g = Graph([linear], [])
+    optimize(g)
+    assert g.outputs[0].op == "const"
+    np.testing.assert_array_equal(run_reference(g, {})[0], np.full((2, 4), 4))
+
+
+def test_autotune_validates_edge_tiles():
+    import importlib
+    tuning = importlib.import_module("tensorforge.autotune")
+    configs = [TileConfig(MC=4, NC=4, KC=3, MR=2, NR=2), TileConfig()]
+    from unittest.mock import patch
+    with patch.object(tuning, "_search_space", return_value=configs):
+        results = tuning.autotune(5, 7, 9, activation="tanh", iters=2, warmup=1)
+    assert len(results) == 2
+    assert all(r.ms > 0 for r in results)
+    assert results[0].ms <= results[1].ms
 
 
 if __name__ == "__main__":

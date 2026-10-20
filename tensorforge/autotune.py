@@ -52,10 +52,17 @@ def autotune(M, N, K, activation="relu", has_bias=True,
     bias = rng.standard_normal((N,), dtype=np.float32) if has_bias else None
     flops = 2.0 * M * N * K
 
+    from .reference import _act
+    expected = A @ B
+    if has_bias:
+        expected = expected + bias
+    expected = _act(activation, expected)
+
     results = []
     for cfg in _search_space():
         try:
             kern = CompiledKernel(cfg, activation, has_bias)
+            np.testing.assert_allclose(kern(A, B, bias), expected, rtol=1e-3, atol=1e-3)
             ms = _time_kernel(kern, A, B, bias, iters, warmup) * 1e3
             results.append(TuneResult(cfg, ms, flops / (ms * 1e-3) / 1e9))
             if verbose:
@@ -64,5 +71,7 @@ def autotune(M, N, K, activation="relu", has_bias=True,
         except Exception as e:  # pragma: no cover - compile failure guard
             if verbose:
                 print(f"  {cfg.label()} FAILED: {e}")
+    if not results:
+        raise RuntimeError("No autotuning candidates succeeded; check gcc and rerun with verbose=True")
     results.sort(key=lambda r: r.ms)
     return results[:topk]
